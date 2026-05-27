@@ -4,6 +4,8 @@ const fileName = document.querySelector("#fileName");
 const model = document.querySelector("#model");
 const organizerEnabled = document.querySelector("#organizerEnabled");
 const organizerTemplate = document.querySelector("#organizerTemplate");
+const organizerProvider = document.querySelector("#organizerProvider");
+const organizerModel = document.querySelector("#organizerModel");
 const organizerContext = document.querySelector("#organizerContext");
 const statusEl = document.querySelector("#status");
 const progress = document.querySelector("#progress");
@@ -35,6 +37,8 @@ function setBusy(isBusy) {
   model.disabled = isBusy;
   organizerEnabled.disabled = isBusy;
   organizerTemplate.disabled = isBusy;
+  organizerProvider.disabled = isBusy;
+  organizerModel.disabled = isBusy;
   organizerContext.disabled = isBusy;
   if (isBusy) {
     setStatus("处理中", "active");
@@ -63,6 +67,8 @@ function uploadFile(file) {
     body.append("model", model.value);
     body.append("organizer_enabled", organizerEnabled.checked ? "1" : "0");
     body.append("organizer_template", organizerTemplate.value);
+    body.append("organizer_provider", organizerProvider.value);
+    body.append("organizer_model", organizerModel.value.trim());
     body.append("organizer_context", organizerContext.value);
 
     const xhr = new XMLHttpRequest();
@@ -114,7 +120,7 @@ async function pollJob(jobId) {
     lastText = data.result?.text || data.partial_text || "";
     result.value = lastText;
     const organizerNote = data.result?.organized_text
-      ? ` | 已整理：${data.result?.organizer_model}`
+      ? ` | 已整理：${data.result?.organizer_provider}/${data.result?.organizer_model}`
       : data.result?.organizer_error
         ? ` | 整理失败：${data.result.organizer_error}`
         : "";
@@ -211,4 +217,12 @@ downloadBtn.addEventListener("click", () => {
   link.download = `${lastFileStem}_dialogue.txt`;
   link.click();
   URL.revokeObjectURL(url);
+});
+
+organizerProvider.addEventListener("change", () => {
+  if (organizerProvider.value === "ollama") {
+    organizerModel.value = "qwen2.5:7b-instruct";
+  } else {
+    organizerModel.value = "gpt-4o-mini";
+  }
 });

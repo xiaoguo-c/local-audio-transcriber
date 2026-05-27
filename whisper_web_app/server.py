@@ -36,7 +36,9 @@ MODELS: dict[str, WhisperModel] = {}
 FUNASR_MODELS: dict[str, object] = {}
 ALLOWED_WHISPER_MODELS = {"tiny", "base", "small", "medium", "large-v3"}
 ALLOWED_FUNASR_MODELS = {"paraformer-zh"}
-DEFAULT_ORGANIZER_MODEL = os.environ.get("OPENAI_ORGANIZER_MODEL", "gpt-4o-mini")
+DEFAULT_OPENAI_ORGANIZER_MODEL = os.environ.get("OPENAI_ORGANIZER_MODEL", "gpt-4o-mini")
+DEFAULT_OLLAMA_ORGANIZER_MODEL = os.environ.get("OLLAMA_ORGANIZER_MODEL", "qwen2.5:7b-instruct")
+OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://127.0.0.1:11434")
 JOB_LOCK = threading.Lock()
 JOBS: dict[str, dict] = {}
 
@@ -244,13 +246,13 @@ def extract_response_text(data: dict) -> str:
     return "\n".join(chunks).strip()
 
 
-def organize_transcript(transcript: str, template: str, context: str) -> dict:
+def organize_with_openai(transcript: str, template: str, context: str) -> dict:
     api_key = os.environ.get("OPENAI_API_KEY")
     if not api_key:
         raise RuntimeError("未配置 OPENAI_API_KEY，无法调用整理模型")
 
     payload = {
-        "model": DEFAULT_ORGANIZER_MODEL,
+        "model": DEFAULT_OPENAI_ORGANIZER_MODEL,
         "input": [
             {
                 "role": "system",
@@ -284,7 +286,56 @@ def organize_transcript(transcript: str, template: str, context: str) -> dict:
     text = extract_response_text(data)
     if not text:
         raise RuntimeError("整理模型没有返回文本")
-    return {"model": DEFAULT_ORGANIZER_MODEL, "text": text}
+    return {"provider": "openai", "model": DEFAULT_OPENAI_ORGANIZER_MODEL, "text": text}
+
+
+def organize_with_ollama(transcript: str, template: str, context: str, model_name: str) -> dict:
+    payload = {
+        "model": model_name,
+        "stream": False,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "你是严谨的中文技术招聘通话整理助手。"
+                    "只基于用户提供的转写稿整理，不确定的信息要标注为未确认。"
+                    "输出要清晰、可复制、适合招聘工作流。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": organizer_prompt(template, context, transcript),
+            },
+        ],
+        "options": {
+            "temperature": 0.2,
+            "num_ctx": 8192,
+        },
+    }
+    request = urllib.request.Request(
+        f"{OLLAMA_URL.rstrip('/')}/api/chat",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=600) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.URLError as exc:
+        raise RuntimeError(
+            "无法连接本地 Ollama。请先安装 Ollama，并运行：ollama pull qwen2.5:7b-instruct"
+        ) from exc
+
+    text = (data.get("message") or {}).get("content", "").strip()
+    if not text:
+        raise RuntimeError("本地 Ollama 没有返回文本")
+    return {"provider": "ollama", "model": model_name, "text": text}
+
+
+def organize_transcript(transcript: str, template: str, context: str, provider: str, model_name: str) -> dict:
+    if provider == "ollama":
+        return organize_with_ollama(transcript, template, context, model_name or DEFAULT_OLLAMA_ORGANIZER_MODEL)
+    return organize_with_openai(transcript, template, context)
 
 
 def parse_multipart(content_type: str, body: bytes) -> tuple[dict[str, str], dict[str, tuple[str, bytes]]]:
@@ -331,10 +382,13 @@ def apply_organizer_if_requested(result: dict, organizer: dict | None, job_id: s
             original_text,
             organizer.get("template", "recruiting_call"),
             organizer.get("context", ""),
+            organizer.get("provider", "ollama"),
+            organizer.get("model", DEFAULT_OLLAMA_ORGANIZER_MODEL),
         )
         result["original_text"] = original_text
         result["organized_text"] = organized["text"]
         result["organizer_model"] = organized["model"]
+        result["organizer_provider"] = organized["provider"]
         result["text"] = organized["text"]
     except Exception as exc:
         result["organizer_error"] = str(exc)
@@ -524,7 +578,9 @@ class Handler(SimpleHTTPRequestHandler):
                     "cached_funasr_models": sorted(FUNASR_MODELS),
                     "funasr_available": FUNASR_DEPS.exists(),
                     "organizer_available": bool(os.environ.get("OPENAI_API_KEY")),
-                    "organizer_model": DEFAULT_ORGANIZER_MODEL,
+                    "openai_organizer_model": DEFAULT_OPENAI_ORGANIZER_MODEL,
+                    "ollama_url": OLLAMA_URL,
+                    "ollama_organizer_model": DEFAULT_OLLAMA_ORGANIZER_MODEL,
                 }
             )
             return
@@ -561,6 +617,8 @@ class Handler(SimpleHTTPRequestHandler):
                 "enabled": fields.get("organizer_enabled") == "1",
                 "template": fields.get("organizer_template", "recruiting_call"),
                 "context": fields.get("organizer_context", ""),
+                "provider": fields.get("organizer_provider", "ollama"),
+                "model": fields.get("organizer_model", DEFAULT_OLLAMA_ORGANIZER_MODEL),
             }
 
             filename, payload = files["audio"]

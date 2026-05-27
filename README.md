@@ -34,7 +34,7 @@ Local Audio Transcriber helps you:
 - Drag-and-drop audio upload
 - Model picker: Whisper `tiny/base/small/medium/large-v3` or FunASR Chinese Paraformer
 - Dialogue-style output with approximate speaker labels
-- Optional OpenAI-powered organizer step
+- Optional organizer step: local Ollama / Qwen or OpenAI API
 - Recruiting-call template with editable domain context and terminology
 - Copy result and download TXT
 - Local-only uploaded files and generated outputs
@@ -55,13 +55,42 @@ http://127.0.0.1:8787
 
 The organizer step cleans up the raw transcript and can produce structured recruiting notes.
 
+### Local Ollama / Qwen
+
+Recommended for private local workflows:
+
+```powershell
+# Install Ollama first from https://ollama.com/download
+ollama pull qwen2.5:7b-instruct
+ollama serve
+```
+
+Then start the app:
+
+```powershell
+$env:OLLAMA_ORGANIZER_MODEL="qwen2.5:7b-instruct"
+$env:OLLAMA_URL="http://127.0.0.1:11434"
+.\whisper_web_app\start.ps1
+```
+
+In the UI, choose:
+
+```text
+Organizer engine: Local Ollama
+Organizer model: qwen2.5:7b-instruct
+```
+
+### OpenAI API
+
+Recommended when you want stronger cleanup and summarization quality:
+
 ```powershell
 $env:OPENAI_API_KEY="your_api_key"
 $env:OPENAI_ORGANIZER_MODEL="gpt-4o-mini"
 .\whisper_web_app\start.ps1
 ```
 
-If `OPENAI_API_KEY` is not set, transcription still works. The UI will keep the original transcript and show that the organizer step was skipped or failed.
+If neither Ollama nor `OPENAI_API_KEY` is available, transcription still works. The UI will keep the original transcript and show that the organizer step was skipped or failed.
 
 ## How The Pipeline Works
 
@@ -106,5 +135,5 @@ That means the app code can be versioned without accidentally publishing private
 
 - Speaker labels are heuristic, not true voice diarization.
 - FunASR progress is coarser than Whisper progress.
-- The organizer model requires an OpenAI API key.
+- Local organizer mode requires Ollama and the selected local model to be installed.
 - The included demo GIF is a UI walkthrough, not a bundled sample recording.

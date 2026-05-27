@@ -45,6 +45,17 @@
               <option value="meeting">会议纪要</option>
             </select>
           </label>
+          <label class="field compact">
+            <span>整理引擎</span>
+            <select id="organizerProvider">
+              <option value="ollama" selected>本地 Ollama</option>
+              <option value="openai">OpenAI API</option>
+            </select>
+          </label>
+          <label class="field compact">
+            <span>整理模型</span>
+            <input id="organizerModel" type="text" value="qwen2.5:7b-instruct" />
+          </label>
           <button id="copyBtn" type="button" disabled>复制结果</button>
           <button id="downloadBtn" type="button" disabled>下载 TXT</button>
         </section>
@@ -54,7 +65,7 @@
             <span>工作背景和术语提示</span>
             <textarea id="organizerContext" spellcheck="false">技术招聘电话，可能涉及候选人背景、Meta、TikTok、ByteDance、LLM、VLM、VLA、ML Infra、Inference、Ranking、Feature Generation、推荐系统、广告系统、模型推理、分布式系统、职级、薪资包、面试流程、湾区、西雅图、机器人、具身智能。</textarea>
           </label>
-          <small>需要在启动服务前设置 OPENAI_API_KEY；未设置时会保留原始转写。</small>
+          <small>本地整理默认使用 Ollama 的 qwen2.5:7b-instruct；OpenAI API 模式需要在启动服务前设置 OPENAI_API_KEY。</small>
         </section>
 
         <label class="dropzone" id="dropzone">
