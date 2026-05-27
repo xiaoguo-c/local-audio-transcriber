@@ -8,6 +8,8 @@ import shutil
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
 import uuid
 from http import HTTPStatus
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
@@ -34,6 +36,7 @@ MODELS: dict[str, WhisperModel] = {}
 FUNASR_MODELS: dict[str, object] = {}
 ALLOWED_WHISPER_MODELS = {"tiny", "base", "small", "medium", "large-v3"}
 ALLOWED_FUNASR_MODELS = {"paraformer-zh"}
+DEFAULT_ORGANIZER_MODEL = os.environ.get("OPENAI_ORGANIZER_MODEL", "gpt-4o-mini")
 JOB_LOCK = threading.Lock()
 JOBS: dict[str, dict] = {}
 
@@ -208,6 +211,82 @@ def get_funasr_model(name: str):
         return FUNASR_MODELS[name]
 
 
+def organizer_prompt(template: str, context: str, transcript: str) -> str:
+    template_label = template or "recruiting_call"
+    if template_label == "recruiting_call":
+        task = (
+            "请把这段技术招聘电话转写稿整理成清晰的中文对话稿和候选人沟通纪要。"
+            "要求：纠正明显错别字和技术词，保留关键信息，不要编造；"
+            "尽量区分招聘顾问和候选人；最后输出候选人背景、意向方向、薪资/职级、地点、面试准备、下一步。"
+        )
+    elif template_label == "dialogue":
+        task = "请把这段转写稿整理成更自然、可读的中文对话稿，修正明显错别字和英文技术术语，不要编造。"
+    else:
+        task = "请把这段转写稿整理成结构清晰的会议纪要，修正明显错别字，不要编造。"
+
+    return (
+        f"{task}\n\n"
+        "领域背景/术语提示：\n"
+        f"{context.strip() or '技术招聘、AI、LLM、ML Infra、模型推理、推荐系统、广告系统、职级、薪资包。'}\n\n"
+        "原始转写稿：\n"
+        f"{transcript}"
+    )
+
+
+def extract_response_text(data: dict) -> str:
+    if data.get("output_text"):
+        return data["output_text"]
+    chunks = []
+    for item in data.get("output", []):
+        for content in item.get("content", []):
+            if content.get("type") in {"output_text", "text"} and content.get("text"):
+                chunks.append(content["text"])
+    return "\n".join(chunks).strip()
+
+
+def organize_transcript(transcript: str, template: str, context: str) -> dict:
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("未配置 OPENAI_API_KEY，无法调用整理模型")
+
+    payload = {
+        "model": DEFAULT_ORGANIZER_MODEL,
+        "input": [
+            {
+                "role": "system",
+                "content": (
+                    "你是严谨的中文技术招聘通话整理助手。"
+                    "只基于用户提供的转写稿整理，不确定的信息要标注为未确认。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": organizer_prompt(template, context, transcript),
+            },
+        ],
+    }
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/responses",
+        data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        raise RuntimeError(f"整理模型调用失败：{detail}") from exc
+
+    text = extract_response_text(data)
+    if not text:
+        raise RuntimeError("整理模型没有返回文本")
+    return {"model": DEFAULT_ORGANIZER_MODEL, "text": text}
+
+
 def parse_multipart(content_type: str, body: bytes) -> tuple[dict[str, str], dict[str, tuple[str, bytes]]]:
     match = re.search(r"boundary=(?P<boundary>[^;]+)", content_type)
     if not match:
@@ -241,7 +320,34 @@ def parse_multipart(content_type: str, body: bytes) -> tuple[dict[str, str], dic
     return fields, files
 
 
-def transcribe_audio(audio_path: Path, model_name: str, job_id: str | None = None) -> dict:
+def apply_organizer_if_requested(result: dict, organizer: dict | None, job_id: str | None = None) -> dict:
+    if not organizer or not organizer.get("enabled"):
+        return result
+    if job_id:
+        set_job(job_id, status="organizing", message="正在调用整理模型", progress=0.98)
+    original_text = result.get("text", "")
+    try:
+        organized = organize_transcript(
+            original_text,
+            organizer.get("template", "recruiting_call"),
+            organizer.get("context", ""),
+        )
+        result["original_text"] = original_text
+        result["organized_text"] = organized["text"]
+        result["organizer_model"] = organized["model"]
+        result["text"] = organized["text"]
+    except Exception as exc:
+        result["organizer_error"] = str(exc)
+        result["text"] = original_text
+    return result
+
+
+def transcribe_audio(
+    audio_path: Path,
+    model_name: str,
+    job_id: str | None = None,
+    organizer: dict | None = None,
+) -> dict:
     started = time.time()
     if job_id:
         set_job(job_id, status="loading", message="正在加载模型", progress=0.03)
@@ -290,9 +396,10 @@ def transcribe_audio(audio_path: Path, model_name: str, job_id: str | None = Non
         "text": text,
     }
 
+    result = apply_organizer_if_requested(result, organizer, job_id)
     output_path = OUTPUTS / f"{audio_path.stem}_{int(time.time())}.json"
-    output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     result["output_file"] = str(output_path)
+    output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     if job_id:
         set_job(
             job_id,
@@ -344,7 +451,12 @@ def normalize_funasr_result(raw_result: list[dict], elapsed: float, model_name: 
     }
 
 
-def transcribe_funasr(audio_path: Path, model_name: str, job_id: str | None = None) -> dict:
+def transcribe_funasr(
+    audio_path: Path,
+    model_name: str,
+    job_id: str | None = None,
+    organizer: dict | None = None,
+) -> dict:
     started = time.time()
     if job_id:
         set_job(job_id, status="loading", message="正在加载 FunASR 模型", progress=0.05)
@@ -361,9 +473,10 @@ def transcribe_funasr(audio_path: Path, model_name: str, job_id: str | None = No
         set_job(job_id, status="formatting", message="正在整理 FunASR 结果", progress=0.9)
 
     result = normalize_funasr_result(raw_result, time.time() - started, model_name)
+    result = apply_organizer_if_requested(result, organizer, job_id)
     output_path = OUTPUTS / f"{audio_path.stem}_{int(time.time())}_funasr.json"
-    output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     result["output_file"] = str(output_path)
+    output_path.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     if job_id:
         set_job(
             job_id,
@@ -378,12 +491,12 @@ def transcribe_funasr(audio_path: Path, model_name: str, job_id: str | None = No
     return result
 
 
-def run_job(job_id: str, audio_path: Path, engine: str, model_name: str) -> None:
+def run_job(job_id: str, audio_path: Path, engine: str, model_name: str, organizer: dict | None) -> None:
     try:
         if engine == "funasr":
-            transcribe_funasr(audio_path, model_name, job_id=job_id)
+            transcribe_funasr(audio_path, model_name, job_id=job_id, organizer=organizer)
         else:
-            transcribe_audio(audio_path, model_name, job_id=job_id)
+            transcribe_audio(audio_path, model_name, job_id=job_id, organizer=organizer)
     except Exception as exc:
         set_job(job_id, status="error", message=str(exc), progress=0)
 
@@ -410,6 +523,8 @@ class Handler(SimpleHTTPRequestHandler):
                     "cached_whisper_models": sorted(MODELS),
                     "cached_funasr_models": sorted(FUNASR_MODELS),
                     "funasr_available": FUNASR_DEPS.exists(),
+                    "organizer_available": bool(os.environ.get("OPENAI_API_KEY")),
+                    "organizer_model": DEFAULT_ORGANIZER_MODEL,
                 }
             )
             return
@@ -442,6 +557,11 @@ class Handler(SimpleHTTPRequestHandler):
                 raise ValueError("Unsupported engine")
             if "audio" not in files:
                 raise ValueError("No audio file uploaded")
+            organizer = {
+                "enabled": fields.get("organizer_enabled") == "1",
+                "template": fields.get("organizer_template", "recruiting_call"),
+                "context": fields.get("organizer_context", ""),
+            }
 
             filename, payload = files["audio"]
             suffix = Path(filename).suffix or ".audio"
@@ -457,12 +577,13 @@ class Handler(SimpleHTTPRequestHandler):
                     "filename": filename,
                     "engine": engine,
                     "model": f"{engine}:{model_name}",
+                    "organizer_enabled": organizer["enabled"],
                     "created_at": time.time(),
                     "partial_text": "",
                 }
             worker = threading.Thread(
                 target=run_job,
-                args=(job_id, audio_path, engine, model_name),
+                args=(job_id, audio_path, engine, model_name, organizer),
                 daemon=True,
             )
             worker.start()

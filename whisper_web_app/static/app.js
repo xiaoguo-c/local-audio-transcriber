@@ -2,6 +2,9 @@ const dropzone = document.querySelector("#dropzone");
 const fileInput = document.querySelector("#fileInput");
 const fileName = document.querySelector("#fileName");
 const model = document.querySelector("#model");
+const organizerEnabled = document.querySelector("#organizerEnabled");
+const organizerTemplate = document.querySelector("#organizerTemplate");
+const organizerContext = document.querySelector("#organizerContext");
 const statusEl = document.querySelector("#status");
 const progress = document.querySelector("#progress");
 const progressBar = document.querySelector(".bar");
@@ -30,6 +33,9 @@ function setProgress(percent, text) {
 function setBusy(isBusy) {
   fileInput.disabled = isBusy;
   model.disabled = isBusy;
+  organizerEnabled.disabled = isBusy;
+  organizerTemplate.disabled = isBusy;
+  organizerContext.disabled = isBusy;
   if (isBusy) {
     setStatus("处理中", "active");
   }
@@ -55,6 +61,9 @@ function uploadFile(file) {
     const body = new FormData();
     body.append("audio", file);
     body.append("model", model.value);
+    body.append("organizer_enabled", organizerEnabled.checked ? "1" : "0");
+    body.append("organizer_template", organizerTemplate.value);
+    body.append("organizer_context", organizerContext.value);
 
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/transcribe");
@@ -97,12 +106,19 @@ async function pollJob(jobId) {
   }
   if (data.duration) {
     meta.textContent = `${data.model} | 已到 ${formatSeconds(data.current_time)} / ${formatSeconds(data.duration)}`;
+  } else if (data.status === "organizing") {
+    meta.textContent = `${data.model} | 整理模型处理中`;
   }
 
   if (data.status === "done") {
     lastText = data.result?.text || data.partial_text || "";
     result.value = lastText;
-    meta.textContent = `${data.model} | 音频 ${formatSeconds(data.result?.duration)} | 用时 ${formatSeconds(data.result?.elapsed)}`;
+    const organizerNote = data.result?.organized_text
+      ? ` | 已整理：${data.result?.organizer_model}`
+      : data.result?.organizer_error
+        ? ` | 整理失败：${data.result.organizer_error}`
+        : "";
+    meta.textContent = `${data.model} | 音频 ${formatSeconds(data.result?.duration)} | 用时 ${formatSeconds(data.result?.elapsed)}${organizerNote}`;
     copyBtn.disabled = !lastText;
     downloadBtn.disabled = !lastText;
     setStatus("已完成", "active");
