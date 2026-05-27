@@ -1,14 +1,45 @@
-# Local Audio Transcription Web App
+# Local Audio Transcriber
 
-A local drag-and-drop web app for Chinese audio transcription. It supports:
+Turn recruiter calls, technical conversations, and meeting recordings into readable Chinese transcripts and structured notes, locally from a drag-and-drop web page.
 
-- faster-whisper model selection
-- FunASR Paraformer Chinese model selection
-- upload progress and transcription status
-- dialogue-style output
-- copy and TXT download
+![Demo](docs/demo.gif)
 
-## Start
+## What It Solves
+
+Audio notes are messy. Technical recruiting calls are worse: half Chinese, half English, full of model names, company names, levels, compensation, locations, and half-finished sentences.
+
+Local Audio Transcriber helps you:
+
+- Drop in an audio file and get a dialogue-style transcript.
+- Choose between `faster-whisper` and `FunASR Paraformer`.
+- See upload and transcription status instead of waiting blindly.
+- Optionally send the transcript to an organizer model for cleanup, speaker-friendly formatting, and recruiting-call summaries.
+- Keep raw audio, uploads, model caches, and generated outputs out of Git.
+
+## Screenshot
+
+![App screenshot](docs/app-screenshot.png)
+
+## Best For
+
+- Technical recruiter phone screens
+- Candidate background calls
+- JD or role-intake calls
+- AI / ML / infra interview prep notes
+- Chinese and mixed Chinese-English technical conversations
+- Personal local transcription workflows
+
+## Key Features
+
+- Drag-and-drop audio upload
+- Model picker: Whisper `tiny/base/small/medium/large-v3` or FunASR Chinese Paraformer
+- Dialogue-style output with approximate speaker labels
+- Optional OpenAI-powered organizer step
+- Recruiting-call template with editable domain context and terminology
+- Copy result and download TXT
+- Local-only uploaded files and generated outputs
+
+## Quick Start
 
 ```powershell
 .\whisper_web_app\start.ps1
@@ -20,9 +51,9 @@ Then open:
 http://127.0.0.1:8787
 ```
 
-## Notes
+## Optional Organizer Model
 
-Optional organizer model:
+The organizer step cleans up the raw transcript and can produce structured recruiting notes.
 
 ```powershell
 $env:OPENAI_API_KEY="your_api_key"
@@ -30,7 +61,19 @@ $env:OPENAI_ORGANIZER_MODEL="gpt-4o-mini"
 .\whisper_web_app\start.ps1
 ```
 
-When enabled in the UI, the app sends the transcript to the OpenAI Responses API for cleanup, speaker-friendly formatting, and recruiting-call summarization. If `OPENAI_API_KEY` is not set, transcription still works and the original transcript is returned.
+If `OPENAI_API_KEY` is not set, transcription still works. The UI will keep the original transcript and show that the organizer step was skipped or failed.
+
+## How The Pipeline Works
+
+```text
+Audio file
+  -> faster-whisper or FunASR
+  -> dialogue formatter
+  -> optional organizer model
+  -> transcript / notes / TXT download
+```
+
+## Local Dependency Notes
 
 FunASR dependencies are expected at:
 
@@ -44,4 +87,24 @@ FunASR / ModelScope model cache is expected at:
 D:\modelscope_cache
 ```
 
-The app keeps uploaded audio and generated outputs out of Git.
+These paths keep large model files out of the repository and away from small system drives.
+
+## Privacy And Git Hygiene
+
+The repository ignores:
+
+- Uploaded audio
+- Generated transcripts
+- Raw segment JSON files
+- Test audio
+- Python cache files
+- Local virtual environments
+
+That means the app code can be versioned without accidentally publishing private calls or large model artifacts.
+
+## Current Limitations
+
+- Speaker labels are heuristic, not true voice diarization.
+- FunASR progress is coarser than Whisper progress.
+- The organizer model requires an OpenAI API key.
+- The included demo GIF is a UI walkthrough, not a bundled sample recording.
