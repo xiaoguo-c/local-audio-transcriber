@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>本地音频转文字</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app">
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <h1>本地音频转文字</h1>
+            <p>拖入音频，选择 faster-whisper 或 FunASR 生成对话稿。</p>
+          </div>
+          <div class="status" id="status">待上传</div>
+        </header>
+
+        <section class="controls" aria-label="转写设置">
+          <label class="field">
+            <span>模型</span>
+            <select id="model">
+              <optgroup label="faster-whisper">
+                <option value="whisper:small" selected>Whisper small（已缓存，推荐）</option>
+                <option value="whisper:base">Whisper base（更快）</option>
+                <option value="whisper:tiny">Whisper tiny（最快）</option>
+                <option value="whisper:medium">Whisper medium（更准，更慢）</option>
+                <option value="whisper:large-v3">Whisper large-v3（最准，首次下载很大）</option>
+              </optgroup>
+              <optgroup label="FunASR">
+                <option value="funasr:paraformer-zh">FunASR Paraformer 中文（本地模型）</option>
+              </optgroup>
+            </select>
+          </label>
+          <button id="copyBtn" type="button" disabled>复制结果</button>
+          <button id="downloadBtn" type="button" disabled>下载 TXT</button>
+        </section>
+
+        <label class="dropzone" id="dropzone">
+          <input id="fileInput" type="file" accept="audio/*,.m4a,.mp3,.wav,.aac,.flac,.mp4" />
+          <span class="dropIcon">+</span>
+          <strong>拖动音频文件到这里</strong>
+          <small>也可以点击选择文件，支持 m4a、mp3、wav、aac、flac、mp4</small>
+          <span class="fileName" id="fileName"></span>
+        </label>
+
+        <div class="progress" id="progress" hidden>
+          <div class="bar"></div>
+          <span id="progressText">正在处理，首次加载模型会慢一些...</span>
+        </div>
+
+        <section class="resultPane" aria-label="转写结果">
+          <div class="resultHeader">
+            <h2>对话稿</h2>
+            <span id="meta"></span>
+          </div>
+          <textarea id="result" spellcheck="false" placeholder="转写完成后会显示在这里。"></textarea>
+        </section>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

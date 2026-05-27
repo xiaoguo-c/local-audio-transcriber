@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+
+# Local transcription data and generated outputs
+*_dialogue.md
+*_dialogue.txt
+*_raw_segments.json
+whisper_web_app/uploads/
+whisper_web_app/outputs/
+whisper_web_app/test_tone.wav
+
+# Local model/dependency caches live outside this repo by default.
+.env
+.venv/
+venv/
